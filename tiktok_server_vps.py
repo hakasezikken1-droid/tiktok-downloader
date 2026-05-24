@@ -1,10 +1,8 @@
 """TikTokダウンローダー Webサーバー（VPS版・固定IP）"""
 
 import os
-import re
-import json
-from http.cookiejar import MozillaCookieJar
-import requests as req
+import subprocess
+import sys
 from flask import Flask, request, jsonify, send_from_directory, render_template_string
 
 SAVE_DIR = "/var/www/tiktok"
@@ -121,86 +119,29 @@ HTML = """<!DOCTYPE html>
 </html>"""
 
 
-def make_session() -> req.Session:
-    session = req.Session()
-    session.headers.update({
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
-        "Accept-Language": "ja,en-US;q=0.7,en;q=0.3",
-        "Referer": "https://www.tiktok.com/",
-    })
-    cookies_file = "/root/cookies.txt"
-    if os.path.exists(cookies_file):
-        jar = MozillaCookieJar()
-        jar.load(cookies_file, ignore_discard=True, ignore_expires=True)
-        session.cookies = jar
-    return session
+YTDLP = "/opt/tiktok-venv/bin/yt-dlp"
+COOKIES_FILE = "/root/cookies.txt"
 
 
 def do_download(url: str) -> str:
-    session = make_session()
+    cmd = [
+        YTDLP,
+        "--no-warnings",
+        "-o", os.path.join(SAVE_DIR, "%(uploader_id)s_%(id)s.%(ext)s"),
+        "--format", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "--merge-output-format", "mp4",
+        "--print", "after_move:filepath",
+    ]
+    if os.path.exists(COOKIES_FILE):
+        cmd += ["--cookies", COOKIES_FILE]
+    cmd.append(url)
 
-    resp = session.get(url, allow_redirects=True, timeout=30)
-    full_url = resp.url
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "ダウンロード失敗")
 
-    match = re.search(r"/video/(\d+)", full_url)
-    if not match:
-        raise RuntimeError(f"動画IDが取得できませんでした: {full_url}")
-    video_id = match.group(1)
-    author_id = "tiktok"
-    download_url = None
-
-    html = resp.text
-    m = re.search(
-        r'<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>',
-        html, re.DOTALL
-    )
-    if m:
-        try:
-            data = json.loads(m.group(1))
-            item = (
-                data
-                .get("__DEFAULT_SCOPE__", {})
-                .get("webapp.video-detail", {})
-                .get("itemInfo", {})
-                .get("itemStruct", {})
-            )
-            video = item.get("video", {})
-            author_id = item.get("author", {}).get("uniqueId", "tiktok")
-            download_url = video.get("playAddr") or video.get("downloadAddr")
-        except Exception:
-            pass
-
-    if not download_url:
-        api = session.get(
-            f"https://www.tiktok.com/api/item/detail/?itemId={video_id}&webapp_id=1988",
-            timeout=30,
-        )
-        if api.ok:
-            try:
-                item = api.json().get("itemInfo", {}).get("itemStruct", {})
-                video = item.get("video", {})
-                author_id = item.get("author", {}).get("uniqueId", "tiktok")
-                download_url = video.get("playAddr") or video.get("downloadAddr")
-            except Exception:
-                pass
-
-    if not download_url:
-        raise RuntimeError("動画URLが取得できませんでした。cookies.txtが必要な可能性があります。")
-
-    filename = f"{author_id}_{video_id}.mp4"
-    filepath = os.path.join(SAVE_DIR, filename)
-
-    with session.get(download_url, stream=True, timeout=120) as r:
-        r.raise_for_status()
-        with open(filepath, "wb") as f:
-            for chunk in r.iter_content(chunk_size=65536):
-                f.write(chunk)
-
-    return filename
+    filepath = result.stdout.strip().splitlines()[-1]
+    return os.path.basename(filepath)
 
 
 @app.route("/")

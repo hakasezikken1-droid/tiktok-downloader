@@ -4,11 +4,14 @@ import os
 import subprocess
 import requests as req
 from flask import Flask, request, jsonify, send_from_directory, render_template_string
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 SAVE_DIR = "/var/www/tiktok"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 app = Flask(__name__)
+limiter = Limiter(get_remote_address, app=app, default_limits=[])
 
 HTML = """<!DOCTYPE html>
 <html lang="ja">
@@ -182,6 +185,7 @@ def index():
 
 
 @app.route("/download", methods=["POST"])
+@limiter.limit("20 per hour;3 per minute")
 def download():
     data = request.get_json()
     url = (data or {}).get("url", "").strip()
@@ -192,6 +196,11 @@ def download():
         return jsonify(ok=True, filename=filename)
     except Exception as e:
         return jsonify(ok=False, error=str(e))
+
+
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    return jsonify(ok=False, error="リクエストが多すぎます。しばらく待ってから試してください。"), 429
 
 
 @app.route("/dl/<path:filename>")

@@ -74,20 +74,6 @@ HTML = """<!DOCTYPE html>
     #status.info  { background: #1e3a5f; color: #7ecfff; display: block; }
     #status.ok    { background: #1a3a1a; color: #7fff7e; display: block; }
     #status.error { background: #3a1a1a; color: #ff7e7e; display: block; }
-    #filelist { margin-top: 20px; }
-    #filelist h2 { font-size: 1rem; color: #aaa; margin-bottom: 10px; }
-    .file-item {
-      background: #222;
-      border-radius: 8px;
-      padding: 10px 14px;
-      margin-bottom: 8px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 0.85rem;
-    }
-    .file-item span { word-break: break-all; flex: 1; margin-right: 10px; color: #ccc; }
-    .file-item a { color: #fe2c55; text-decoration: none; white-space: nowrap; font-weight: bold; }
   </style>
 </head>
 <body>
@@ -97,7 +83,6 @@ HTML = """<!DOCTYPE html>
     <input type="text" id="url" placeholder="https://www.tiktok.com/@.../video/..." />
     <button id="btn" onclick="startDownload()">ダウンロード</button>
     <div id="status"></div>
-    <div id="filelist"></div>
   </div>
   <script>
     function setStatus(msg, type) {
@@ -120,7 +105,6 @@ HTML = """<!DOCTYPE html>
         if (data.ok) {
           setStatus('✓ 完了: ' + data.filename, 'ok');
           document.getElementById('url').value = '';
-          loadFiles();
         } else {
           setStatus('エラー: ' + data.error, 'error');
         }
@@ -129,22 +113,9 @@ HTML = """<!DOCTYPE html>
       }
       document.getElementById('btn').disabled = false;
     }
-    async function loadFiles() {
-      const res = await fetch('/files');
-      const data = await res.json();
-      const el = document.getElementById('filelist');
-      if (!data.files.length) { el.innerHTML = ''; return; }
-      el.innerHTML = '<h2>保存済み動画</h2>' + data.files.map(f =>
-        `<div class="file-item">
-          <span>${f}</span>
-          <a href="/dl/${encodeURIComponent(f)}" download>保存</a>
-        </div>`
-      ).join('');
-    }
     document.getElementById('url').addEventListener('keydown', e => {
       if (e.key === 'Enter') startDownload();
     });
-    loadFiles();
   </script>
 </body>
 </html>"""
@@ -248,16 +219,6 @@ def download():
         return jsonify(ok=True, filename=filename)
     except Exception as e:
         return jsonify(ok=False, error=str(e))
-
-
-@app.route("/files")
-def list_files():
-    files = sorted(
-        [f for f in os.listdir(SAVE_DIR) if f.endswith((".mp4", ".webm", ".mkv"))],
-        key=lambda f: os.path.getmtime(os.path.join(SAVE_DIR, f)),
-        reverse=True,
-    )
-    return jsonify(files=files[:20])
 
 
 @app.route("/dl/<path:filename>")

@@ -1,0 +1,5 @@
+cookies.txt
+.ngrok_token
+.discord_webhook_tiktok
+__pycache__/
+*.pyc

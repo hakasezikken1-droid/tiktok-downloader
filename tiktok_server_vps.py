@@ -2,7 +2,7 @@
 
 import os
 import subprocess
-import sys
+import requests as req
 from flask import Flask, request, jsonify, send_from_directory, render_template_string
 
 SAVE_DIR = "/var/www/tiktok"
@@ -101,7 +101,9 @@ HTML = """<!DOCTYPE html>
         });
         const data = await res.json();
         if (data.ok) {
-          setStatus('✓ 完了: ' + data.filename, 'ok');
+          const el = document.getElementById('status');
+          el.className = 'ok';
+          el.innerHTML = '✓ 完了 &nbsp;<a href="/dl/' + encodeURIComponent(data.filename) + '" download style="color:#fff;background:#27ae60;padding:6px 16px;border-radius:8px;text-decoration:none;font-weight:bold;">📥 保存</a>';
           document.getElementById('url').value = '';
         } else {
           setStatus('エラー: ' + data.error, 'error');
@@ -123,6 +125,35 @@ YTDLP = "/opt/tiktok-venv/bin/yt-dlp"
 COOKIES_FILE = "/root/cookies.txt"
 
 
+def _download_file(video_url: str, filename: str) -> str:
+    filepath = os.path.join(SAVE_DIR, filename)
+    with req.get(video_url, stream=True, timeout=120, headers={
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15"
+    }) as r:
+        r.raise_for_status()
+        with open(filepath, "wb") as f:
+            for chunk in r.iter_content(chunk_size=65536):
+                f.write(chunk)
+    return filename
+
+
+def _try_tikwm(url: str) -> str:
+    resp = req.post(
+        "https://www.tikwm.com/api/",
+        data={"url": url, "hd": "1"},
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=30,
+    )
+    data = resp.json()
+    if data.get("code") != 0:
+        raise RuntimeError(data.get("msg", "tikwm API失敗"))
+    item = data["data"]
+    video_url = item.get("hdplay") or item.get("play")
+    author = item.get("author", {}).get("unique_id", "tiktok")
+    video_id = item.get("id", "unknown")
+    return _download_file(video_url, f"{author}_{video_id}.mp4")
+
+
 def do_download(url: str) -> str:
     cmd = [
         YTDLP,
@@ -137,11 +168,12 @@ def do_download(url: str) -> str:
     cmd.append(url)
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "ダウンロード失敗")
+    if result.returncode == 0:
+        filepath = result.stdout.strip().splitlines()[-1]
+        return os.path.basename(filepath)
 
-    filepath = result.stdout.strip().splitlines()[-1]
-    return os.path.basename(filepath)
+    # yt-dlp失敗時はtikwm API経由でダウンロード
+    return _try_tikwm(url)
 
 
 @app.route("/")

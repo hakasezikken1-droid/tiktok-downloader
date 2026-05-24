@@ -293,6 +293,8 @@ if __name__ == "__main__":
         with open(token_file, encoding="utf-8-sig") as f:
             conf.get_default().auth_token = f.read().strip()
 
+    ngrok.kill()
+    time.sleep(1)
     tunnel = ngrok.connect(5000, "http")
     public_url = tunnel.public_url
 

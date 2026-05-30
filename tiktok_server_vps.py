@@ -5,13 +5,23 @@ import subprocess
 import requests as req
 from flask import Flask, request, jsonify, send_from_directory, render_template_string
 from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 
 SAVE_DIR = "/var/www/tiktok"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 app = Flask(__name__)
-limiter = Limiter(get_remote_address, app=app, default_limits=[])
+
+
+def _get_real_ip():
+    # Cloudflareトンネル経由の場合、本当のクライアントIPはCF-Connecting-IPヘッダーにある
+    return (
+        request.headers.get("CF-Connecting-IP")
+        or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        or request.remote_addr
+    )
+
+
+limiter = Limiter(_get_real_ip, app=app, default_limits=[])
 
 HTML = """<!DOCTYPE html>
 <html lang="ja">
